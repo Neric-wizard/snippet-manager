@@ -1,10 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Search, Copy, Trash2, Edit2, X, Check } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+
+const supabase = createClient(
+  "https://uxinmkincruczosbqjwl.supabase.co",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV4aW5ta2luY3J1Y3pvc2JxandsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc5MTQ0NDIsImV4cCI6MjA5MzQ5MDQ0Mn0.XrbhL1Zrk3yA05MJszfR3gRd_jVAxxqBZXWeKRGwBWI"
+);
 
 interface Snippet {
   id: string;
@@ -12,52 +18,55 @@ interface Snippet {
   code: string;
   language: string;
   tags: string[];
+  created_at?: string;
 }
 
 export default function Home() {
-  const [snippets, setSnippets] = useState<Snippet[]>([
-    {
-      id: "1",
-      title: "useState Hook",
-      code: "const [count, setCount] = useState(0)",
-      language: "javascript",
-      tags: ["react", "hooks"],
-    },
-    {
-      id: "2",
-      title: "Supabase Query",
-      code: "const { data } = await supabase.from('posts').select('*')",
-      language: "javascript",
-      tags: ["supabase", "database"],
-    },
-  ]);
+  const [snippets, setSnippets] = useState<Snippet[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [newSnippet, setNewSnippet] = useState({ title: "", code: "", language: "javascript", tags: "" });
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  const filteredSnippets = snippets.filter(
-    (s) =>
-      s.title.toLowerCase().includes(search.toLowerCase()) ||
-      s.tags.some((tag) => tag.toLowerCase().includes(search.toLowerCase()))
-  );
+  useEffect(() => {
+    fetchSnippets();
+  }, []);
 
-  const addSnippet = () => {
-    if (!newSnippet.title || !newSnippet.code) return;
-    const snippet: Snippet = {
-      id: Date.now().toString(),
-      title: newSnippet.title,
-      code: newSnippet.code,
-      language: newSnippet.language,
-      tags: newSnippet.tags.split(",").map(t => t.trim()),
-    };
-    setSnippets([snippet, ...snippets]);
-    setShowModal(false);
-    setNewSnippet({ title: "", code: "", language: "javascript", tags: "" });
+  const fetchSnippets = async () => {
+    const { data } = await supabase
+      .from("snippets")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (data) setSnippets(data);
+    setLoading(false);
   };
 
-  const deleteSnippet = (id: string) => {
+  const addSnippet = async () => {
+    if (!newSnippet.title || !newSnippet.code) return;
+    
+    const tagsArray = newSnippet.tags.split(",").map(t => t.trim()).filter(t => t);
+    
+    const { data } = await supabase
+      .from("snippets")
+      .insert([{
+        title: newSnippet.title,
+        code: newSnippet.code,
+        language: newSnippet.language,
+        tags: tagsArray,
+      }])
+      .select();
+    
+    if (data) {
+      setSnippets([data[0], ...snippets]);
+      setShowModal(false);
+      setNewSnippet({ title: "", code: "", language: "javascript", tags: "" });
+    }
+  };
+
+  const deleteSnippet = async (id: string) => {
+    await supabase.from("snippets").delete().eq("id", id);
     setSnippets(snippets.filter(s => s.id !== id));
     setDeleteConfirm(null);
   };
@@ -67,6 +76,20 @@ export default function Home() {
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
+
+  const filteredSnippets = snippets.filter(
+    (s) =>
+      s.title.toLowerCase().includes(search.toLowerCase()) ||
+      s.tags?.some((tag) => tag.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 relative overflow-hidden">
@@ -117,7 +140,7 @@ export default function Home() {
         {/* Stats Bar */}
         <div className="flex gap-4 mb-6 text-sm text-gray-400">
           <span>📦 {snippets.length} snippets</span>
-          <span>🏷️ {new Set(snippets.flatMap(s => s.tags)).size} tags</span>
+          <span>🏷️ {new Set(snippets.flatMap(s => s.tags || [])).size} tags</span>
           <span>💻 {new Set(snippets.map(s => s.language)).size} languages</span>
         </div>
 
@@ -149,9 +172,6 @@ export default function Home() {
                   <div className="flex justify-between items-start mb-3">
                     <h3 className="text-xl font-semibold text-white">{snippet.title}</h3>
                     <div className="flex gap-2">
-                      <button className="p-1 hover:text-purple-400 transition">
-                        <Edit2 size={16} />
-                      </button>
                       {deleteConfirm === snippet.id ? (
                         <div className="flex gap-1 bg-red-500/20 rounded-lg p-1">
                           <button onClick={() => deleteSnippet(snippet.id)} className="px-2 py-0.5 text-xs text-red-400 hover:bg-red-500/20 rounded">✓</button>
@@ -178,7 +198,7 @@ export default function Home() {
                     <span className="px-2 py-1 text-xs bg-purple-500/20 text-purple-300 rounded-full">
                       {snippet.language}
                     </span>
-                    {snippet.tags.map((tag, i) => (
+                    {snippet.tags?.map((tag, i) => (
                       <span key={i} className="px-2 py-1 text-xs bg-gray-700 text-gray-300 rounded-full">
                         #{tag}
                       </span>
